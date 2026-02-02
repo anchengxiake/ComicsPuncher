@@ -83,9 +83,12 @@ class PicaPuncher:
                 logging.error(f"❌ 哔咔登录失败: {login_data.get('message')}")
                 return False
 
-            token = login_data["data"]["token"]
-            user_info = login_data["data"]["user"]
-            logging.info(f"🎉 哔咔登录成功！用户: {user_info.get('email')}")
+            token = login_data.get("data", {}).get("token")
+            if not token:
+                logging.error("❌ 哔咔获取token失败")
+                return False
+            
+            logging.info("🎉 哔咔登录成功")
 
             # 签到
             punch_path = "users/punch-in"
