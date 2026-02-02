@@ -7,10 +7,9 @@ import logging
 import os
 import sys
 import re
-import json
 import time
-import requests
 from datetime import datetime
+from jmcomic import JmOption
 
 # 日志格式
 logging.basicConfig(
@@ -28,77 +27,45 @@ except ImportError:
 
 
 class JmPuncher:
-    """禁漫天堂自动登录（通过 API）"""
+    """禁漫天堂自动登录（基于 jmcomic 库）"""
 
     def __init__(self, username, password, proxy=None):
         self.username = username
         self.password = password
-        self.proxies = {"http": proxy, "https": proxy} if proxy else None
-        self.session = requests.Session()
-        if self.proxies:
-            self.session.proxies.update(self.proxies)
-
-    def get_domain(self):
-        """获取最新的禁漫域名"""
-        try:
-            # 从官方API获取最新域名
-            resp = self.session.get(
-                "https://comic-api-doc.jmhh.net/api/getContentIndexDomain",
-                timeout=10
-            )
-            data = resp.json()
-            if data.get("code") == 200:
-                return data["data"].get("domain", "https://api.jmhh.net")
-        except:
-            pass
-        return "https://api.jmhh.net"
+        self.proxy = proxy
 
     def run(self):
         try:
             logging.info(f"正在尝试登录禁漫 (用户: {self.username})...")
             
-            # 获取最新域名
-            domain = self.get_domain()
-            
-            # 登录接口
-            login_url = f"{domain}/user/login"
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Content-Type": "application/x-www-form-urlencoded"
-            }
-            
-            data = {
-                "username": self.username,
-                "password": self.password
-            }
-            
-            resp = self.session.post(login_url, data=data, headers=headers, timeout=20)
-            result = resp.json()
-            
-            if result.get("code") != 0:
-                logging.error(f"❌ 禁漫登录失败: {result.get('message', '未知错误')}")
-                return False
-            
-            user_data = result.get("data", {})
-            username_from_api = user_data.get("username", self.username)
-            
-            logging.info(f"🎉 禁漫登录成功！用户: {username_from_api}")
-            
-            # 显示用户信息
-            level = user_data.get("level")
-            coin = user_data.get("coin")
-            if level:
-                logging.info(f"   等级: {level}")
-            if coin:
-                logging.info(f"   金币: {coin}")
+            # 构造禁漫配置
+            option = JmOption.construct(
+                {
+                    "client": {
+                        "username": self.username,
+                        "password": self.password,
+                        "proxies": {"http": self.proxy, "https": self.proxy}
+                        if self.proxy
+                        else None,
+                    }
+                }
+            )
+            client = option.build_jm_client()
+
+            # 登录
+            resp = client.login(self.username, self.password)
+            user_data = resp.res_data
+
+            logging.info("=" * 30)
+            logging.info(f"🎉 禁漫登录成功！")
+            logging.info(f"用户名: {user_data.get('username', self.username)}")
+            logging.info(f"金币余额: {user_data.get('coin', 'N/A')}")
+            logging.info("=" * 30)
             
             return True
 
-        except requests.exceptions.RequestException as e:
-            logging.error(f"❌ 禁漫网络异常: {e}")
-            return False
         except Exception as e:
-            logging.error(f"❌ 禁漫异常: {e}")
+            logging.error(f"❌ 禁漫登录失败: {e}")
             return False
 
 
