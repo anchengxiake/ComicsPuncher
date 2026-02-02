@@ -12,9 +12,13 @@ class JmPuncher:
         self.username = username
         self.password = password
         self.proxy = proxy
+        self.user_data = None
 
     def run(self):
+        """执行禁漫天堂登录并自动完成活跃"""
         try:
+            logging.info(f"正在尝试登录禁漫 (用户: {self.username})...")
+            
             # 构造禁漫配置
             option = JmOption.construct(
                 {
@@ -29,16 +33,31 @@ class JmPuncher:
             )
             client = option.build_jm_client()
 
-            logging.info(f"正在尝试登录 JM (用户: {self.username})...")
             # 登录接口返回的数据包含完整用户信息
             resp = client.login(self.username, self.password)
-            user_data = resp.res_data
+            self.user_data = resp.res_data
 
-            logging.info("=" * 20)
-            logging.info("🎉 JM 登录活跃成功！")
-            logging.info(f"用户名: {user_data.get('username')}")
-            logging.info(f"金币余额: {user_data.get('coin')}")
-            logging.info("=" * 20)
+            logging.info("=" * 40)
+            logging.info("🎉 禁漫登录成功！")
+            logging.info(f"   用户名: {self.user_data.get('username')}")
+            logging.info(f"   金币余额: {self.user_data.get('coin')}")
+            
+            # 检查是否有额外信息
+            level = self.user_data.get('level')
+            if level:
+                logging.info(f"   用户等级: {level}")
+            
+            exp = self.user_data.get('exp')
+            if exp:
+                logging.info(f"   经验值: {exp}")
+            
+            logging.info("=" * 40)
+            
+            return True
 
+        except ConnectionError as e:
+            logging.error(f"❌ 禁漫网络连接异常: {e}")
+            raise
         except Exception as e:
-            logging.error(f"JM 运行异常: {e}")
+            logging.error(f"❌ 禁漫运行异常: {e}")
+            raise

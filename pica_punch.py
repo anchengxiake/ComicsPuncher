@@ -8,6 +8,7 @@ import logging
 class PicaPuncher:
     """
     哔咔漫画自动签到类
+    基于哔咔官方 API 实现
     """
 
     API_URL = "https://picaapi.picacomic.com"
@@ -18,6 +19,7 @@ class PicaPuncher:
         self.username = username
         self.password = password
         self.proxies = {"http": proxy, "https": proxy} if proxy else None
+        self.user_info = None
 
     def _get_headers(self, path, method, token=None):
         """构建哔咔特有的加密请求头"""
@@ -49,9 +51,10 @@ class PicaPuncher:
         return headers
 
     def run(self):
-        """执行全流程：登录 -> 签到"""
+        """执行全流程：登录 -> 获取用户信息 -> 签到"""
         try:
             # 1. 登录
+            logging.info(f"正在尝试登录哔咔 (用户: {self.username})...")
             login_path = "auth/sign-in"
             res = requests.post(
                 f"{self.API_URL}/{login_path}",
@@ -63,13 +66,17 @@ class PicaPuncher:
 
             login_data = res.json()
             if res.status_code != 200 or login_data.get("message") != "success":
-                logging.error(f"哔咔登录失败: {login_data}")
-                return
+                logging.error(f"❌ 哔咔登录失败: {login_data.get('message')}")
+                raise Exception(f"Login failed: {login_data.get('message')}")
 
             token = login_data["data"]["token"]
-            logging.info("哔咔登录成功")
+            self.user_info = login_data["data"]["user"]
+            logging.info("🎉 哔咔登录成功")
+            logging.info(f"   用户: {self.user_info.get('email')}")
+            logging.info(f"   经验值: {self.user_info.get('exp')}")
 
             # 2. 签到
+            logging.info("正在进行哔咔签到...")
             punch_path = "users/punch-in"
             res = requests.post(
                 f"{self.API_URL}/{punch_path}",
@@ -80,11 +87,23 @@ class PicaPuncher:
 
             punch_data = res.json()
             if punch_data.get("message") == "success":
-                logging.info(
-                    f"哔咔签到成功！结果: {punch_data['data']['res']['status']}"
-                )
+                punch_info = punch_data["data"]["res"]
+                logging.info("=" * 30)
+                logging.info("✅ 哔咔签到成功！")
+                logging.info(f"   状态: {punch_info.get('status')}")
+                logging.info(f"   奖励: +{punch_info.get('punchInDay')} 天连续签到")
+                logging.info("=" * 30)
+                return True
+            elif punch_data.get("message") == "user already punch in":
+                logging.info("⚠️  哔咔今日已签到")
+                return True
             else:
-                logging.warning(f"哔咔签到反馈: {punch_data.get('message')}")
+                logging.warning(f"⚠️  哔咔签到反馈: {punch_data.get('message')}")
+                return False
 
+        except requests.exceptions.RequestException as e:
+            logging.error(f"❌ 哔咔网络异常: {e}")
+            raise
         except Exception as e:
-            logging.error(f"哔咔运行异常: {e}")
+            logging.error(f"❌ 哔咔运行异常: {e}")
+            raise
