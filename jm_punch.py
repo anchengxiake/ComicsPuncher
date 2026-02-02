@@ -8,7 +8,9 @@ import os
 import sys
 import re
 import json
+import time
 import requests
+from datetime import datetime
 
 # 日志格式
 logging.basicConfig(
@@ -115,9 +117,7 @@ def parse_accounts(account_str):
 
 
 if __name__ == "__main__":
-    logging.info("=" * 50)
-    logging.info("🚀 禁漫签到脚本启动")
-    logging.info("=" * 50)
+    print(f"==== 禁漫签到开始 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ====\n")
 
     # 获取配置
     jm_accounts = []
@@ -139,24 +139,34 @@ if __name__ == "__main__":
         logging.error("❌ 未配置禁漫账号，请设置 JM_ACCOUNT 或 JM_USER/JM_PW")
         sys.exit(1)
 
-    results = []
+    print(f"✅ 检测到共 {len(jm_accounts)} 个禁漫账号\n")
+    print("----------禁漫开始尝试登录----------")
+
+    msg = ""
     for idx, (user, pwd) in enumerate(jm_accounts, 1):
-        logging.info(f"\n【账号 {idx}/{len(jm_accounts)}】")
+        log = f"\n🙍🏻 第{idx}个账号 ({user})\n"
+        msg += log
+        
         puncher = JmPuncher(user, pwd, proxy)
         if puncher.run():
-            results.append(f"✅ 禁漫账号 {idx} 登录成功")
+            result_msg = f"✅ 登录成功\n"
+            msg += result_msg
         else:
-            results.append(f"❌ 禁漫账号 {idx} 登录失败")
+            result_msg = f"❌ 登录失败\n"
+            msg += result_msg
+        
+        logging.info(log + result_msg)
+        
+        # 多账号间随机延迟
+        if idx < len(jm_accounts):
+            time.sleep(1)
 
-    summary = "\n".join(results)
-    logging.info("\n" + "=" * 50)
-    logging.info("📊 结果:")
-    logging.info(summary)
-    logging.info("=" * 50)
-
+    print("----------禁漫登录执行完毕----------")
+    print(f"\n==== 禁漫签到完成 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ====")
+    
     # 推送通知
     if notify:
         try:
-            notify("禁漫签到", summary)
+            notify("禁漫签到", msg[:-1])  # 去掉最后的换行符
         except Exception as e:
             logging.error(f"推送失败: {e}")
