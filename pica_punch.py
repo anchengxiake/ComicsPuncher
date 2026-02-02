@@ -1,15 +1,34 @@
+"""
+哔咔漫画自动签到脚本
+cron "30 8 * * *" script-path=pica_punch.py,tag=哔咔签到
+new Env('哔咔签到')
+"""
+import logging
+import os
+import sys
+import re
 import time
 import hmac
 import hashlib
 import requests
-import logging
+
+# 日志格式
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
+
+# 尝试加载通知模块
+notify = None
+try:
+    from notify import send
+    notify = send
+    logging.info("✅ 已加载 notify 通知模块")
+except ImportError:
+    logging.warning("⚠️ 未加载通知模块")
 
 
 class PicaPuncher:
-    """
-    哔咔漫画自动签到类
-    基于哔咔官方 API 实现
-    """
+    """哔咔漫画自动签到"""
 
     API_URL = "https://picaapi.picacomic.com"
     SECRET_KEY = r"~d}$Q7$eIni=V)9\RK/P.RM4;9[7|@/CA}b~OW!3?EV`:<>M7pddUBL5n|0/*Cn"
@@ -19,14 +38,11 @@ class PicaPuncher:
         self.username = username
         self.password = password
         self.proxies = {"http": proxy, "https": proxy} if proxy else None
-        self.user_info = None
 
     def _get_headers(self, path, method, token=None):
-        """构建哔咔特有的加密请求头"""
-        nonce = "b1ab87b4800d4d4590a11701b8551afa"  # 固定随机数
+        """构建哔咔加密请求头"""
+        nonce = "b1ab87b4800d4d4590a11701b8551afa"
         ts = str(int(time.time()))
-
-        # 签名算法: url路径 + 时间戳 + 随机数 + 请求方式 + API_KEY
         raw = (path + ts + nonce + method + self.API_KEY).lower()
         signature = hmac.new(
             self.SECRET_KEY.encode(), raw.encode(), hashlib.sha256
@@ -37,7 +53,7 @@ class PicaPuncher:
             "signature": signature,
             "time": ts,
             "nonce": nonce,
-            "app-channel": "2",  # 分流通道
+            "app-channel": "2",
             "app-version": "2.2.1.2.3.3",
             "app-uuid": "defaultUuid",
             "app-platform": "android",
@@ -51,9 +67,7 @@ class PicaPuncher:
         return headers
 
     def run(self):
-        """执行全流程：登录 -> 获取用户信息 -> 签到"""
         try:
-            # 1. 登录
             logging.info(f"正在尝试登录哔咔 (用户: {self.username})...")
             login_path = "auth/sign-in"
             res = requests.post(
@@ -67,16 +81,13 @@ class PicaPuncher:
             login_data = res.json()
             if res.status_code != 200 or login_data.get("message") != "success":
                 logging.error(f"❌ 哔咔登录失败: {login_data.get('message')}")
-                raise Exception(f"Login failed: {login_data.get('message')}")
+                return False
 
             token = login_data["data"]["token"]
-            self.user_info = login_data["data"]["user"]
-            logging.info("🎉 哔咔登录成功")
-            logging.info(f"   用户: {self.user_info.get('email')}")
-            logging.info(f"   经验值: {self.user_info.get('exp')}")
+            user_info = login_data["data"]["user"]
+            logging.info(f"🎉 哔咔登录成功！用户: {user_info.get('email')}")
 
-            # 2. 签到
-            logging.info("正在进行哔咔签到...")
+            # 签到
             punch_path = "users/punch-in"
             res = requests.post(
                 f"{self.API_URL}/{punch_path}",
@@ -87,23 +98,77 @@ class PicaPuncher:
 
             punch_data = res.json()
             if punch_data.get("message") == "success":
-                punch_info = punch_data["data"]["res"]
-                logging.info("=" * 30)
-                logging.info("✅ 哔咔签到成功！")
-                logging.info(f"   状态: {punch_info.get('status')}")
-                logging.info(f"   奖励: +{punch_info.get('punchInDay')} 天连续签到")
-                logging.info("=" * 30)
+                logging.info("✅ 哔咔签到成功")
                 return True
             elif punch_data.get("message") == "user already punch in":
                 logging.info("⚠️  哔咔今日已签到")
                 return True
             else:
-                logging.warning(f"⚠️  哔咔签到反馈: {punch_data.get('message')}")
+                logging.warning(f"⚠️  哔咔签到失败: {punch_data.get('message')}")
                 return False
 
-        except requests.exceptions.RequestException as e:
-            logging.error(f"❌ 哔咔网络异常: {e}")
-            raise
         except Exception as e:
-            logging.error(f"❌ 哔咔运行异常: {e}")
-            raise
+            logging.error(f"❌ 哔咔异常: {e}")
+            return False
+
+
+def parse_accounts(account_str):
+    """解析账号: user1:pass1&user2:pass2 或 user1:pass1\nuser2:pass2"""
+    if not account_str:
+        return []
+    accounts = re.split(r'[&\n]', account_str.strip())
+    result = []
+    for account in accounts:
+        account = account.strip()
+        if ':' in account:
+            user, pwd = account.split(':', 1)
+            result.append((user.strip(), pwd.strip()))
+    return result
+
+
+if __name__ == "__main__":
+    logging.info("=" * 50)
+    logging.info("🚀 哔咔签到脚本启动")
+    logging.info("=" * 50)
+
+    # 获取配置
+    pica_accounts = []
+    
+    # 优先使用 PICA_ACCOUNT（多账号）
+    pica_account_str = os.getenv('PICA_ACCOUNT', '').strip()
+    if pica_account_str:
+        pica_accounts = parse_accounts(pica_account_str)
+    else:
+        # 兼容旧配置
+        pica_user = os.getenv('PICA_USER', '').strip()
+        pica_pw = os.getenv('PICA_PW', '').strip()
+        if pica_user and pica_pw:
+            pica_accounts.append((pica_user, pica_pw))
+    
+    proxy = os.getenv('MY_PROXY', '').strip() or None
+
+    if not pica_accounts:
+        logging.error("❌ 未配置哔咔账号，请设置 PICA_ACCOUNT 或 PICA_USER/PICA_PW")
+        sys.exit(1)
+
+    results = []
+    for idx, (user, pwd) in enumerate(pica_accounts, 1):
+        logging.info(f"\n【账号 {idx}/{len(pica_accounts)}】")
+        puncher = PicaPuncher(user, pwd, proxy)
+        if puncher.run():
+            results.append(f"✅ 哔咔账号 {idx} 签到成功")
+        else:
+            results.append(f"❌ 哔咔账号 {idx} 签到失败")
+
+    summary = "\n".join(results)
+    logging.info("\n" + "=" * 50)
+    logging.info("📊 签到结果:")
+    logging.info(summary)
+    logging.info("=" * 50)
+
+    # 推送通知
+    if notify:
+        try:
+            notify("哔咔签到", summary)
+        except Exception as e:
+            logging.error(f"推送失败: {e}")
